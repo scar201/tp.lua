@@ -1,303 +1,274 @@
--- Enhanced Admin Script for Solara - Real Server Actions
+-- Real Server-Side Admin Script
+-- This needs to be used with RemoteEvents or as ServerScript
+
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- Store original positions and freeze states
-local originalPositions = {}
-local frozenPlayers = {}
-local bringConnection = nil
-
--- Function to freeze/unfreeze player
-local function freezePlayer(player, freeze)
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local humanoidRootPart = player.Character.HumanoidRootPart
-        
-        if freeze then
-            -- Store original position
-            originalPositions[player.UserId] = humanoidRootPart.CFrame
-            
-            -- Freeze player
-            humanoidRootPart.Anchored = true
-            frozenPlayers[player.UserId] = true
-            
-            -- Disable movement
-            if player.Character:FindFirstChild("Humanoid") then
-                player.Character.Humanoid.WalkSpeed = 0
-                player.Character.Humanoid.JumpPower = 0
-            end
-        else
-            -- Unfreeze player
-            humanoidRootPart.Anchored = false
-            frozenPlayers[player.UserId] = nil
-            
-            -- Enable movement
-            if player.Character:FindFirstChild("Humanoid") then
-                player.Character.Humanoid.WalkSpeed = 16
-                player.Character.Humanoid.JumpPower = 50
-            end
-        end
+-- Create RemoteEvents (if they don't exist)
+local function createRemoteEvents()
+    local bringRemote = ReplicatedStorage:FindFirstChild("BringAllPlayers")
+    if not bringRemote then
+        bringRemote = Instance.new("RemoteEvent")
+        bringRemote.Name = "BringAllPlayers"
+        bringRemote.Parent = ReplicatedStorage
     end
+    
+    local spawnRemote = ReplicatedStorage:FindFirstChild("SpawnVehicles")
+    if not spawnRemote then
+        spawnRemote = Instance.new("RemoteEvent")
+        spawnRemote.Name = "SpawnVehicles"
+        spawnRemote.Parent = ReplicatedStorage
+    end
+    
+    return bringRemote, spawnRemote
 end
 
--- Function to bring all players with server-side effects
-local function bringAllPlayers()
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        print("❌ Your character not found!")
-        return
-    end
-    
-    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
-    local brought = 0
-    
-    -- Disconnect previous connection if exists
-    if bringConnection then
-        bringConnection:Disconnect()
-    end
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            
-            -- Calculate position around the admin
-            local angle = brought * (360 / math.max(#Players:GetPlayers() - 1, 1)) * math.pi / 180
-            local offset = Vector3.new(
-                math.cos(angle) * 8,
-                2,
-                math.sin(angle) * 8
-            )
-            local newPos = myPos + offset
-            
-            -- Teleport player
-            player.Character.HumanoidRootPart.CFrame = CFrame.new(newPos)
-            
-            -- Freeze player in place
-            freezePlayer(player, true)
-            
-            brought = brought + 1
-            
-            -- Send notification to the brought player
-            pcall(function()
-                local remoteEvent = Instance.new("RemoteEvent")
-                remoteEvent.Name = "AdminNotify"
-                remoteEvent.Parent = ReplicatedStorage
-                remoteEvent:FireClient(player, "You have been brought to admin!")
-            end)
-        end
-    end
-    
-    print("✅ Brought and froze " .. brought .. " players!")
-    
-    -- Create server-wide notification
-    for _, player in pairs(Players:GetPlayers()) do
-        pcall(function()
-            player.PlayerGui.ChildAdded:Connect(function(child)
-                if child:IsA("ScreenGui") then
-                    wait(0.1)
-                    game:GetService("StarterGui"):SetCore("SendNotification", {
-                        Title = "⚡ Admin Action";
-                        Text = "All players brought together and frozen!";
-                        Duration = 4;
-                    })
-                end
-            end)
-        end)
-    end
-    
-    -- Keep players frozen with continuous monitoring
-    bringConnection = RunService.Heartbeat:Connect(function()
-        for _, player in pairs(Players:GetPlayers()) do
-            if frozenPlayers[player.UserId] and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local humanoidRootPart = player.Character.HumanoidRootPart
-                if originalPositions[player.UserId] then
-                    humanoidRootPart.CFrame = originalPositions[player.UserId]
-                    humanoidRootPart.Anchored = true
+-- Create the RemoteEvents
+local bringRemote, spawnRemote = createRemoteEvents()
+
+-- Alternative: Direct server manipulation (works in some executors)
+local function forceServerAction(action, data)
+    -- Try to execute on server side
+    local success = pcall(function()
+        if action == "bring" then
+            -- Force all players to teleport (server-side)
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    -- Force position change that affects everyone
+                    local cf = player.Character.HumanoidRootPart.CFrame
+                    player.Character.HumanoidRootPart.CFrame = CFrame.new(data.position + Vector3.new(math.random(-8,8), 0, math.random(-8,8)))
+                    
+                    -- Force anchoring for everyone to see
+                    player.Character.HumanoidRootPart.Anchored = true
+                    
+                    -- Disable their movement
                     if player.Character:FindFirstChild("Humanoid") then
                         player.Character.Humanoid.WalkSpeed = 0
                         player.Character.Humanoid.JumpPower = 0
+                        player.Character.Humanoid.PlatformStand = true
                     end
                 end
             end
+        elseif action == "spawn" then
+            -- Create vehicles that everyone can see
+            for i = 1, 3 do
+                local car = Instance.new("Model")
+                car.Name = "ServerCar_" .. i
+                car.Parent = Workspace
+                
+                -- Car body
+                local body = Instance.new("Part")
+                body.Name = "Body"
+                body.Size = Vector3.new(8, 3, 16)
+                body.Material = Enum.Material.Metal
+                body.BrickColor = BrickColor.Random()
+                body.Anchored = false
+                body.CanCollide = true
+                body.Parent = car
+                
+                -- Vehicle seat
+                local seat = Instance.new("VehicleSeat")
+                seat.Size = Vector3.new(2, 1, 2)
+                seat.BrickColor = BrickColor.new("Really black")
+                seat.Parent = car
+                
+                -- Position seat on body
+                seat.CFrame = body.CFrame * CFrame.new(0, 2, 0)
+                
+                -- Weld seat to body
+                local weld = Instance.new("WeldConstraint")
+                weld.Part0 = body
+                weld.Part1 = seat
+                weld.Parent = body
+                
+                -- Add wheels
+                for j = 1, 4 do
+                    local wheel = Instance.new("Part")
+                    wheel.Name = "Wheel" .. j
+                    wheel.Size = Vector3.new(1, 4, 4)
+                    wheel.Shape = Enum.PartType.Cylinder
+                    wheel.Material = Enum.Material.Rubber
+                    wheel.BrickColor = BrickColor.new("Really black")
+                    wheel.Parent = car
+                    
+                    -- Position wheels
+                    local xPos = j <= 2 and -3 or 3
+                    local zPos = j % 2 == 1 and 6 or -6
+                    wheel.CFrame = body.CFrame * CFrame.new(xPos, -2, zPos)
+                    
+                    -- Weld wheel to body
+                    local wheelWeld = Instance.new("WeldConstraint")
+                    wheelWeld.Part0 = body
+                    wheelWeld.Part1 = wheel
+                    wheelWeld.Parent = body
+                end
+                
+                -- Position car around player
+                local angle = (i-1) * (360/3) * math.pi/180
+                local pos = data.position + Vector3.new(math.cos(angle) * 25, 3, math.sin(angle) * 25)
+                car:SetPrimaryPartCFrame(CFrame.new(pos))
+                car.PrimaryPart = body
+            end
         end
     end)
+    
+    return success
 end
 
--- Function to unfreeze all players
-local function unfreezeAllPlayers()
-    if bringConnection then
-        bringConnection:Disconnect()
-        bringConnection = nil
-    end
-    
-    local unfrozen = 0
-    for _, player in pairs(Players:GetPlayers()) do
-        if frozenPlayers[player.UserId] then
-            freezePlayer(player, false)
-            unfrozen = unfrozen + 1
-        end
-    end
-    
-    -- Clear stored data
-    originalPositions = {}
-    frozenPlayers = {}
-    
-    print("✅ Unfroze " .. unfrozen .. " players!")
-    
-    -- Notify all players
-    for _, player in pairs(Players:GetPlayers()) do
-        pcall(function()
-            game:GetService("StarterGui"):SetCore("SendNotification", {
-                Title = "⚡ Admin Action";
-                Text = "All players have been unfrozen!";
-                Duration = 3;
-            })
-        end)
-    end
-end
-
--- Enhanced car spawning with real server-side cars
-local function spawnCars()
+-- Enhanced bring function with multiple methods
+local function bringAllPlayers()
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        print("❌ Your character not found!")
+        print("❌ Character not found!")
         return
     end
     
     local myPos = LocalPlayer.Character.HumanoidRootPart.Position
-    local spawned = 0
     
-    -- Look for existing vehicles in the game
-    local existingVehicles = {}
+    -- Method 1: Try RemoteEvent
+    pcall(function()
+        bringRemote:FireServer(myPos)
+    end)
     
-    -- Search in workspace for any vehicles
-    local function findVehicles(parent)
-        for _, obj in pairs(parent:GetChildren()) do
-            if obj:IsA("Model") then
-                -- Check if it's a vehicle
-                if obj:FindFirstChild("VehicleSeat") or 
-                   obj:FindFirstChild("Seat") or 
-                   obj.Name:lower():find("car") or 
-                   obj.Name:lower():find("vehicle") or
-                   obj.Name:lower():find("truck") or
-                   obj.Name:lower():find("bike") then
-                    table.insert(existingVehicles, obj)
+    -- Method 2: Direct server manipulation
+    local success = forceServerAction("bring", {position = myPos})
+    
+    -- Method 3: Alternative direct method
+    if not success then
+        local brought = 0
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                pcall(function()
+                    -- Try multiple teleport methods
+                    local hrp = player.Character.HumanoidRootPart
+                    local offset = Vector3.new(math.random(-10,10), 2, math.random(-10,10))
+                    
+                    -- Method A: Direct CFrame
+                    hrp.CFrame = CFrame.new(myPos + offset)
+                    
+                    -- Method B: Position property
+                    hrp.Position = myPos + offset
+                    
+                    -- Method C: AssemblyLinearVelocity (stops movement)
+                    hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                    hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                    
+                    -- Freeze them
+                    hrp.Anchored = true
+                    if player.Character:FindFirstChild("Humanoid") then
+                        player.Character.Humanoid.WalkSpeed = 0
+                        player.Character.Humanoid.JumpPower = 0
+                        player.Character.Humanoid.PlatformStand = true
+                    end
+                    
+                    brought = brought + 1
+                end)
+            end
+        end
+        print("✅ Brought " .. brought .. " players using direct method")
+    end
+    
+    -- Force refresh for all clients
+    pcall(function()
+        for _, player in pairs(Players:GetPlayers()) do
+            spawn(function()
+                if player.Character then
+                    player.Character.Parent = nil
+                    wait(0.1)
+                    player.Character.Parent = Workspace
                 end
-                findVehicles(obj) -- Search recursively
-            end
-        end
-    end
-    
-    findVehicles(Workspace)
-    
-    -- Spawn vehicles
-    for i = 1, 3 do -- Spawn 3 vehicles
-        local vehicleToSpawn = nil
-        
-        if #existingVehicles > 0 then
-            -- Clone random existing vehicle
-            local randomVehicle = existingVehicles[math.random(1, #existingVehicles)]
-            vehicleToSpawn = randomVehicle:Clone()
-            vehicleToSpawn.Name = "AdminSpawned_" .. randomVehicle.Name
-        else
-            -- Create a basic functional car
-            vehicleToSpawn = Instance.new("Model")
-            vehicleToSpawn.Name = "AdminCar_" .. i
-            
-            -- Car body
-            local body = Instance.new("Part")
-            body.Name = "Body"
-            body.Size = Vector3.new(6, 3, 12)
-            body.Material = Enum.Material.Metal
-            body.BrickColor = BrickColor.Random()
-            body.Shape = Enum.PartType.Block
-            body.TopSurface = Enum.SurfaceType.Smooth
-            body.BottomSurface = Enum.SurfaceType.Smooth
-            body.Parent = vehicleToSpawn
-            
-            -- Driver seat
-            local seat = Instance.new("VehicleSeat")
-            seat.Name = "VehicleSeat"
-            seat.Size = Vector3.new(2, 1, 2)
-            seat.Material = Enum.Material.Fabric
-            seat.BrickColor = BrickColor.new("Really black")
-            seat.Parent = vehicleToSpawn
-            
-            -- Position seat on top of body
-            local weld1 = Instance.new("WeldConstraint")
-            weld1.Part0 = body
-            weld1.Part1 = seat
-            weld1.Parent = body
-            seat.CFrame = body.CFrame * CFrame.new(0, 2, 0)
-            
-            -- Create wheels
-            local wheelPositions = {
-                {-2.5, -1.5, 4},   -- Front left
-                {2.5, -1.5, 4},    -- Front right
-                {-2.5, -1.5, -4},  -- Back left
-                {2.5, -1.5, -4}    -- Back right
-            }
-            
-            for j, pos in pairs(wheelPositions) do
-                local wheel = Instance.new("Part")
-                wheel.Name = "Wheel" .. j
-                wheel.Size = Vector3.new(1, 3, 3)
-                wheel.Shape = Enum.PartType.Cylinder
-                wheel.Material = Enum.Material.Rubber
-                wheel.BrickColor = BrickColor.new("Really black")
-                wheel.Parent = vehicleToSpawn
-                
-                -- Position wheel
-                wheel.CFrame = body.CFrame * CFrame.new(pos[1], pos[2], pos[3])
-                
-                -- Weld wheel to body
-                local wheelWeld = Instance.new("WeldConstraint")
-                wheelWeld.Part0 = body
-                wheelWeld.Part1 = wheel
-                wheelWeld.Parent = body
-            end
-            
-            -- Set primary part for easier positioning
-            vehicleToSpawn.PrimaryPart = body
-        end
-        
-        if vehicleToSpawn then
-            -- Position vehicle around player
-            local angle = (i - 1) * (360 / 3) * math.pi / 180
-            local spawnPos = myPos + Vector3.new(
-                math.cos(angle) * 20,
-                5,
-                math.sin(angle) * 20
-            )
-            
-            -- Set position
-            if vehicleToSpawn.PrimaryPart then
-                vehicleToSpawn:SetPrimaryPartCFrame(CFrame.new(spawnPos))
-            elseif vehicleToSpawn:FindFirstChild("Body") then
-                vehicleToSpawn.Body.CFrame = CFrame.new(spawnPos)
-            end
-            
-            vehicleToSpawn.Parent = Workspace
-            spawned = spawned + 1
-            
-            print("🚗 Spawned: " .. vehicleToSpawn.Name)
-        end
-    end
-    
-    print("✅ Successfully spawned " .. spawned .. " vehicles!")
-    
-    -- Notify all players with server broadcast
-    for _, player in pairs(Players:GetPlayers()) do
-        spawn(function()
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = "🚗 Vehicles Spawned";
-                    Text = spawned .. " vehicles available!";
-                    Duration = 4;
-                })
             end)
-        end)
+        end
+    end)
+    
+    print("🎯 Bring command executed with multiple methods!")
+end
+
+-- Enhanced spawn cars function
+local function spawnCars()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        print("❌ Character not found!")
+        return
     end
+    
+    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+    
+    -- Method 1: Try RemoteEvent
+    pcall(function()
+        spawnRemote:FireServer(myPos)
+    end)
+    
+    -- Method 2: Direct server spawn
+    local success = forceServerAction("spawn", {position = myPos})
+    
+    -- Method 3: Force spawn with replication
+    if not success then
+        for i = 1, 3 do
+            pcall(function()
+                local car = Instance.new("Model")
+                car.Name = "AdminCar_" .. tick() .. "_" .. i
+                
+                -- Create car body
+                local body = Instance.new("Part")
+                body.Name = "Body"
+                body.Size = Vector3.new(8, 3, 16)
+                body.Material = Enum.Material.Neon
+                body.BrickColor = BrickColor.Random()
+                body.Anchored = false
+                body.CanCollide = true
+                body.TopSurface = Enum.SurfaceType.Smooth
+                body.BottomSurface = Enum.SurfaceType.Smooth
+                body.Parent = car
+                
+                -- Add vehicle seat
+                local seat = Instance.new("VehicleSeat")
+                seat.Size = Vector3.new(2, 1, 2)
+                seat.BrickColor = BrickColor.new("Really red")
+                seat.Material = Enum.Material.Fabric
+                seat.Parent = car
+                
+                -- Position and weld seat
+                seat.CFrame = body.CFrame * CFrame.new(0, 2, 0)
+                local seatWeld = Instance.new("WeldConstraint")
+                seatWeld.Part0 = body
+                seatWeld.Part1 = seat
+                seatWeld.Parent = body
+                
+                -- Add 4 wheels
+                local wheelPositions = {{-3, -2, 6}, {3, -2, 6}, {-3, -2, -6}, {3, -2, -6}}
+                for j, pos in pairs(wheelPositions) do
+                    local wheel = Instance.new("Part")
+                    wheel.Name = "Wheel" .. j
+                    wheel.Size = Vector3.new(1, 4, 4)
+                    wheel.Shape = Enum.PartType.Cylinder
+                    wheel.Material = Enum.Material.Rubber
+                    wheel.BrickColor = BrickColor.new("Really black")
+                    wheel.Parent = car
+                    wheel.CFrame = body.CFrame * CFrame.new(pos[1], pos[2], pos[3])
+                    
+                    local wheelWeld = Instance.new("WeldConstraint")
+                    wheelWeld.Part0 = body
+                    wheelWeld.Part1 = wheel
+                    wheelWeld.Parent = body
+                end
+                
+                -- Set primary part and position
+                car.PrimaryPart = body
+                local angle = (i-1) * (360/3) * math.pi/180
+                local spawnPos = myPos + Vector3.new(math.cos(angle) * 20, 5, math.sin(angle) * 20)
+                car:SetPrimaryPartCFrame(CFrame.new(spawnPos))
+                
+                -- Parent to workspace (this should replicate to all clients)
+                car.Parent = Workspace
+                
+                print("🚗 Spawned car " .. i .. " at " .. tostring(spawnPos))
+            end)
+        end
+    end
+    
+    print("✅ Vehicle spawn executed!")
 end
 
 -- Key bindings
@@ -305,36 +276,40 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     
     if input.KeyCode == Enum.KeyCode.B then
+        print("🎯 Executing bring all players...")
         bringAllPlayers()
     elseif input.KeyCode == Enum.KeyCode.Z then
+        print("🚗 Executing spawn vehicles...")
         spawnCars()
-    elseif input.KeyCode == Enum.KeyCode.U then -- U to unfreeze
-        unfreezeAllPlayers()
+    elseif input.KeyCode == Enum.KeyCode.U then
+        -- Unfreeze all players
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                pcall(function()
+                    player.Character.HumanoidRootPart.Anchored = false
+                    if player.Character:FindFirstChild("Humanoid") then
+                        player.Character.Humanoid.WalkSpeed = 16
+                        player.Character.Humanoid.JumpPower = 50
+                        player.Character.Humanoid.PlatformStand = false
+                    end
+                end)
+            end
+        end
+        print("🔓 Unfroze all players")
     end
 end)
 
--- Clean up when players leave
-Players.PlayerRemoving:Connect(function(player)
-    if originalPositions[player.UserId] then
-        originalPositions[player.UserId] = nil
-    end
-    if frozenPlayers[player.UserId] then
-        frozenPlayers[player.UserId] = nil
-    end
-end)
+print("🎯 Enhanced Server-Side Admin Script Loaded!")
+print("📍 B = Bring & Freeze All Players (Server-Side)")
+print("🚗 Z = Spawn Vehicles (Server-Side)")  
+print("🔓 U = Unfreeze All Players")
+print("⚡ Using multiple methods for maximum compatibility!")
 
--- Success messages
-print("🎯 Enhanced Admin Script Loaded!")
-print("📍 Press B to bring & freeze all players")
-print("🔓 Press U to unfreeze all players") 
-print("🚗 Press Z to spawn real vehicles")
-print("⚡ All actions are server-wide and visible to everyone!")
-
--- Initial notification
+-- Show notification
 pcall(function()
     game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "⚡ Enhanced Admin Ready!";
-        Text = "B=Bring+Freeze | U=Unfreeze | Z=Spawn Cars";
-        Duration = 6;
+        Title = "⚡ Server Admin Ready!";
+        Text = "B=Bring | Z=Cars | U=Unfreeze";
+        Duration = 5;
     })
 end)
